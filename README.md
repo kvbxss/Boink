@@ -1,4 +1,4 @@
-# Boink - The Ultimate Music Bot 🎵
+# Boink - The Ultimate Discord Music Bot 🎵
 
 ![Boink Logo](bee.png)
 
