@@ -12,10 +12,28 @@ const client = new Client({
 
 const player = new Player(client);
 
-client.login(config.token);
+async function safeReply(interaction, message) {
+  try {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(message);
+      return;
+    }
+
+    await interaction.reply({ content: message, ephemeral: true });
+  } catch (error) {
+    console.error("❌ Failed to send interaction response:", error.message);
+  }
+}
 
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+
+  try {
+    await player.scanDeps();
+    console.log("✅ discord-player dependencies loaded.");
+  } catch (error) {
+    console.error("❌ Could not load discord-player dependencies:", error);
+  }
 
   const commands = [
     {
@@ -36,14 +54,12 @@ client.once("ready", async () => {
   ];
 
   const rest = new REST({ version: "10" }).setToken(config.token);
+
   try {
     console.log("🔄 Refreshing Slash Commands...");
-    await rest.put(
-      Routes.applicationGuildCommands(client.user.id, config.guild_id),
-      {
-        body: commands,
-      }
-    );
+    await rest.put(Routes.applicationGuildCommands(client.user.id, config.guild_id), {
+      body: commands,
+    });
     console.log("✅ Slash Commands Loaded!");
   } catch (error) {
     console.error("❌ Error loading Slash Commands:", error);
@@ -74,75 +90,118 @@ player.on("channelEmpty", (queue) =>
 player.on("queueEnd", (queue) => queue.metadata.send("✅ | Queue finished!"));
 
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isCommand()) return;
+  if (!interaction.isChatInputCommand()) return;
 
-  const queue = player.getQueue(interaction.guildId);
-  await interaction.deferReply();
+  if (!interaction.inGuild()) {
+    await safeReply(interaction, "❌ | This command can only be used in a server.");
+    return;
+  }
 
-  switch (interaction.commandName) {
-    case "play": {
-      const query = interaction.options.getString("query");
+  try {
+    await interaction.deferReply();
+
+    if (interaction.commandName === "play") {
+      const voiceChannel = interaction.member.voice && interaction.member.voice.channel;
+      if (!voiceChannel) {
+        await safeReply(
+          interaction,
+          "❌ | You need to be in a voice channel to use this command!"
+        );
+        return;
+      }
+
+      const query = interaction.options.getString("query", true);
 
       const searchResult = await player.search(query, {
         requestedBy: interaction.user,
         searchEngine: QueryType.AUTO,
       });
 
-      if (!searchResult || !searchResult.tracks.length)
-        return interaction.followUp("❌ | No results found!");
+      if (!searchResult || !searchResult.tracks.length) {
+        await safeReply(interaction, "❌ | No results found!");
+        return;
+      }
 
-      const queue = player.createQueue(interaction.guild, {
+      const musicQueue = player.createQueue(interaction.guild, {
         metadata: interaction.channel,
       });
 
       try {
-        if (!queue.connection)
-          await queue.connect(interaction.member.voice.channel);
-      } catch {
+        if (!musicQueue.connection) {
+          await musicQueue.connect(voiceChannel);
+        }
+      } catch (error) {
         player.deleteQueue(interaction.guildId);
-        return interaction.followUp("❌ | Could not join your voice channel!");
+        await safeReply(interaction, "❌ | Could not join your voice channel!");
+        return;
       }
 
-      interaction.followUp(
+      await safeReply(
+        interaction,
         `⏱ | Loading your ${searchResult.playlist ? "playlist" : "track"}...`
       );
-      searchResult.playlist
-        ? queue.addTracks(searchResult.tracks)
-        : queue.addTrack(searchResult.tracks[0]);
 
-      if (!queue.playing) await queue.play();
-      break;
+      if (searchResult.playlist) {
+        musicQueue.addTracks(searchResult.tracks);
+      } else {
+        musicQueue.addTrack(searchResult.tracks[0]);
+      }
+
+      if (!musicQueue.playing) {
+        await musicQueue.play();
+      }
+      return;
     }
 
-    case "skip": {
-      if (!queue || !queue.playing)
-        return interaction.followUp("❌ | No music is currently playing!");
+    const queue = player.getQueue(interaction.guildId);
+
+    if (interaction.commandName === "skip") {
+      if (!queue || !queue.playing) {
+        await safeReply(interaction, "❌ | No music is currently playing!");
+        return;
+      }
+
       const currentTrack = queue.current;
       const success = queue.skip();
-      return interaction.followUp(
+      await safeReply(
+        interaction,
         success
           ? `✅ | Skipped **${currentTrack.title}**!`
           : "❌ | Something went wrong!"
       );
+      return;
     }
 
-    case "stop": {
-      if (!queue || !queue.playing)
-        return interaction.followUp("❌ | No music is currently playing!");
+    if (interaction.commandName === "stop") {
+      if (!queue || !queue.playing) {
+        await safeReply(interaction, "❌ | No music is currently playing!");
+        return;
+      }
+
       queue.destroy();
-      return interaction.followUp(
-        "🛑 | Stopped the player and cleared the queue!"
-      );
+      await safeReply(interaction, "🛑 | Stopped the player and cleared the queue!");
+      return;
     }
 
-    case "queue": {
-      if (!queue || !queue.playing)
-        return interaction.followUp("❌ | No music is currently playing!");
-      return interaction.followUp(
-        `🎵 Queue:\n${queue.tracks
-          .map((t, i) => `${i + 1}. ${t.title}`)
-          .join("\n")}`
-      );
+    if (interaction.commandName === "queue") {
+      if (!queue || !queue.playing) {
+        await safeReply(interaction, "❌ | No music is currently playing!");
+        return;
+      }
+
+      const queueText = queue.tracks.map((track, i) => `${i + 1}. ${track.title}`).join("\n");
+      await safeReply(interaction, `🎵 Queue:\n${queueText}`);
+      return;
     }
+
+    await safeReply(interaction, "❌ | Unknown command.");
+  } catch (error) {
+    console.error("❌ Error handling command:", error);
+    await safeReply(
+      interaction,
+      "❌ | I ran into an error while running that command. Check bot logs."
+    );
   }
 });
+
+client.login(config.token);
