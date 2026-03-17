@@ -93,10 +93,28 @@ player.on("queueEnd", (queue) => queue.metadata.send("✅ | Queue finished!"));
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
-  if (!interaction.inGuild()) {
-    await safeReply(interaction, "❌ | This command can only be used in a server.");
-    return;
-  }
+
+  const queue = player.getQueue(interaction.guildId);
+
+  try {
+    await interaction.deferReply();
+
+    switch (interaction.commandName) {
+    case "play": {
+      if (!interaction.member.voice?.channel)
+        return interaction.editReply(
+          "❌ | You need to be in a voice channel to use this command!"
+        );
+
+      const query = interaction.options.getString("query");
+
+      const searchResult = await player.search(query, {
+        requestedBy: interaction.user,
+        searchEngine: QueryType.AUTO,
+      });
+
+      if (!searchResult || !searchResult.tracks.length)
+        return interaction.editReply("❌ | No results found!");
 
   try {
     await interaction.deferReply();
@@ -154,57 +172,73 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      case "skip": {
-        if (!queue || !queue.playing) {
-          await safeReply(interaction, "❌ | No music is currently playing!");
-          return;
-        }
-
-        const currentTrack = queue.current;
-        const success = queue.skip();
-
-        await safeReply(
-          interaction,
-          success
-            ? `✅ | Skipped **${currentTrack.title}**!`
-            : "❌ | Something went wrong!"
-        );
-        return;
+      try {
+        if (!queue.connection)
+          await queue.connect(interaction.member.voice.channel);
+      } catch {
+        player.deleteQueue(interaction.guildId);
+        return interaction.editReply("❌ | Could not join your voice channel!");
       }
 
-      case "stop": {
-        if (!queue || !queue.playing) {
-          await safeReply(interaction, "❌ | No music is currently playing!");
-          return;
-        }
+      await interaction.editReply(
+        `⏱ | Loading your ${searchResult.playlist ? "playlist" : "track"}...`
+      );
+      searchResult.playlist
+        ? queue.addTracks(searchResult.tracks)
+        : queue.addTrack(searchResult.tracks[0]);
 
-        queue.destroy();
-        await safeReply(interaction, "🛑 | Stopped the player and cleared the queue!");
-        return;
-      }
+      if (!queue.playing) await queue.play();
+      break;
+    }
 
-      case "queue": {
-        if (!queue || !queue.playing) {
-          await safeReply(interaction, "❌ | No music is currently playing!");
-          return;
-        }
+    case "skip": {
+      if (!queue || !queue.playing)
+        return interaction.editReply("❌ | No music is currently playing!");
+      const currentTrack = queue.current;
+      const success = queue.skip();
+      return interaction.editReply(
+        success
+          ? `✅ | Skipped **${currentTrack.title}**!`
+          : "❌ | Something went wrong!"
+      );
+    }
 
-        await safeReply(
-          interaction,
-          `🎵 Queue:\n${queue.tracks.map((t, i) => `${i + 1}. ${t.title}`).join("\n")}`
-        );
-        return;
-      }
+    case "stop": {
+      if (!queue || !queue.playing)
+        return interaction.editReply("❌ | No music is currently playing!");
+      queue.destroy();
+      return interaction.editReply(
+        "🛑 | Stopped the player and cleared the queue!"
+      );
+    }
 
-      default:
-        await safeReply(interaction, "❌ | Unknown command.");
+    case "queue": {
+      if (!queue || !queue.playing)
+        return interaction.editReply("❌ | No music is currently playing!");
+      return interaction.editReply(
+        `🎵 Queue:\n${queue.tracks
+          .map((t, i) => `${i + 1}. ${t.title}`)
+          .join("\n")}`
+      );
+    }
+
+    default:
+      return interaction.editReply("❌ | Unknown command.");
     }
   } catch (error) {
     console.error("❌ Error handling command:", error);
-    await safeReply(
-      interaction,
-      "❌ | I ran into an error while running that command. Check bot logs."
-    );
+
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(
+        "❌ | I ran into an error while running that command."
+      );
+      return;
+    }
+
+    await interaction.reply({
+      content: "❌ | I ran into an error while running that command.",
+      ephemeral: true,
+    });
   }
 });
 
