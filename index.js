@@ -74,13 +74,20 @@ player.on("channelEmpty", (queue) =>
 player.on("queueEnd", (queue) => queue.metadata.send("✅ | Queue finished!"));
 
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isCommand()) return;
+  if (!interaction.isChatInputCommand()) return;
 
   const queue = player.getQueue(interaction.guildId);
-  await interaction.deferReply();
 
-  switch (interaction.commandName) {
+  try {
+    await interaction.deferReply();
+
+    switch (interaction.commandName) {
     case "play": {
+      if (!interaction.member.voice?.channel)
+        return interaction.editReply(
+          "❌ | You need to be in a voice channel to use this command!"
+        );
+
       const query = interaction.options.getString("query");
 
       const searchResult = await player.search(query, {
@@ -89,7 +96,7 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       if (!searchResult || !searchResult.tracks.length)
-        return interaction.followUp("❌ | No results found!");
+        return interaction.editReply("❌ | No results found!");
 
       const queue = player.createQueue(interaction.guild, {
         metadata: interaction.channel,
@@ -100,10 +107,10 @@ client.on("interactionCreate", async (interaction) => {
           await queue.connect(interaction.member.voice.channel);
       } catch {
         player.deleteQueue(interaction.guildId);
-        return interaction.followUp("❌ | Could not join your voice channel!");
+        return interaction.editReply("❌ | Could not join your voice channel!");
       }
 
-      interaction.followUp(
+      await interaction.editReply(
         `⏱ | Loading your ${searchResult.playlist ? "playlist" : "track"}...`
       );
       searchResult.playlist
@@ -116,10 +123,10 @@ client.on("interactionCreate", async (interaction) => {
 
     case "skip": {
       if (!queue || !queue.playing)
-        return interaction.followUp("❌ | No music is currently playing!");
+        return interaction.editReply("❌ | No music is currently playing!");
       const currentTrack = queue.current;
       const success = queue.skip();
-      return interaction.followUp(
+      return interaction.editReply(
         success
           ? `✅ | Skipped **${currentTrack.title}**!`
           : "❌ | Something went wrong!"
@@ -128,21 +135,39 @@ client.on("interactionCreate", async (interaction) => {
 
     case "stop": {
       if (!queue || !queue.playing)
-        return interaction.followUp("❌ | No music is currently playing!");
+        return interaction.editReply("❌ | No music is currently playing!");
       queue.destroy();
-      return interaction.followUp(
+      return interaction.editReply(
         "🛑 | Stopped the player and cleared the queue!"
       );
     }
 
     case "queue": {
       if (!queue || !queue.playing)
-        return interaction.followUp("❌ | No music is currently playing!");
-      return interaction.followUp(
+        return interaction.editReply("❌ | No music is currently playing!");
+      return interaction.editReply(
         `🎵 Queue:\n${queue.tracks
           .map((t, i) => `${i + 1}. ${t.title}`)
           .join("\n")}`
       );
     }
+
+    default:
+      return interaction.editReply("❌ | Unknown command.");
+    }
+  } catch (error) {
+    console.error("❌ Error handling command:", error);
+
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(
+        "❌ | I ran into an error while running that command."
+      );
+      return;
+    }
+
+    await interaction.reply({
+      content: "❌ | I ran into an error while running that command.",
+      ephemeral: true,
+    });
   }
 });
