@@ -1,11 +1,16 @@
 {
   "dependencies": {
+    "@discord-player/extractor": "^7.1.0",
     "@discordjs/opus": "^0.10.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@types/node": "^22.13.1",
     "discord-api-types": "^0.37.119",
     "discord-player": "^5.3.2",
     "discord.js": "^14.17.3",
     "ffmpeg": "^0.0.4",
+    "ffmpeg-static": "^5.2.0",
     "fluent-ffmpeg": "^2.1.3",
+    "typescript": "^5.7.3",
     "ytdl-core": "^4.11.5"
   }
 }

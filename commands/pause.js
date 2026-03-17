@@ -1,0 +1,24 @@
+import { SlashCommandBuilder } from "discord.js";
+import { useQueue, useTimeline } from "discord-player";
+
+export const data = new SlashCommandBuilder()
+  .setName("pause")
+  .setDescription("Pause the currently playing song");
+
+export async function execute(interaction) {
+  const timeline = useTimeline();
+
+  if (!timeline) {
+    return interaction.reply(
+      "This server does not have an active player session."
+    );
+  }
+
+  const wasPaused = timeline.paused;
+
+  wasPaused ? timeline.resume() : timeline.pause();
+
+  return interaction.reply(
+    `The player is now ${wasPaused ? "playing" : "paused"}.`
+  );
+}
